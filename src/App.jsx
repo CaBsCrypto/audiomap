@@ -57,7 +57,7 @@ export default function App() {
 
   const {
     saveState, currentMapId, setCurrentMapId,
-    autoSave, subscribeToMap, loadMap, loadSharedMap, generateShareLink,
+    autoSave, subscribeToMap, loadMap, listMaps, deleteMap, loadSharedMap, generateShareLink,
   } = useFirestore(user?.uid);
 
   // ── Suscripción en vivo multidisciplpositivo ──────────────────
