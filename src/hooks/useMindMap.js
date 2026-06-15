@@ -46,12 +46,10 @@ export function useMindMap(svgRef) {
   }, []);
 
   const setNodesAndCommit = useCallback((valOrFn) => {
-    _setNodes(prev => {
-      const next = typeof valOrFn === 'function' ? valOrFn(prev) : valOrFn;
-      commitHistory(next);
-      return next;
-    });
-  }, [commitHistory]);
+    const next = typeof valOrFn === 'function' ? valOrFn(nodes) : valOrFn;
+    commitHistory(next);
+    _setNodes(next);
+  }, [nodes, commitHistory]);
 
   const undo = useCallback(() => {
     if (historyIndexRef.current > 0) {
@@ -117,10 +115,12 @@ export function useMindMap(svgRef) {
     const nodeToDelete = nodes.find(n => n.id === activeNodeId);
     if (!nodeToDelete || nodeToDelete.isMain) return; // Protección raíz
 
-    const collectDescendants = (id) => {
+    const collectDescendants = (id, visited = new Set()) => {
+      if (visited.has(id)) return [];
+      visited.add(id);
       const directChildren = nodes.filter(n => n.parent === id).map(n => n.id);
       return directChildren.reduce((acc, childId) => {
-        return [...acc, childId, ...collectDescendants(childId)];
+        return [...acc, childId, ...collectDescendants(childId, visited)];
       }, []);
     };
 
@@ -176,6 +176,7 @@ export function useMindMap(svgRef) {
   return {
     nodes,
     setNodes,
+    setNodesAndCommit,
     activeNodeId,
     setActiveNodeId,
     editingNodeId,

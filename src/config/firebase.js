@@ -17,17 +17,20 @@ const firebaseConfig = {
 
 let app, auth, db, googleProvider;
 
+const createMockDb = () => new Proxy({}, { get: () => () => ({}) });
+
 try {
   // Verificación básica para evitar crash si el apiKey es un dummy de .env.example
   if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes('xxxxxxxx')) {
     console.warn("⚠️ Firebase no se inicializó porque faltan claves en el .env");
-    // Mock para salir del estado de carga en la app y mostrar el LoginScreen
     auth = { 
       onAuthStateChanged: (cb) => { 
         setTimeout(() => cb(null), 100); 
         return () => {}; 
       }
     };
+    db = createMockDb();
+    googleProvider = {};
   } else {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
@@ -42,6 +45,8 @@ try {
       return () => {}; 
     }
   };
+  db = createMockDb();
+  googleProvider = {};
 }
 
 export { auth, db, googleProvider };

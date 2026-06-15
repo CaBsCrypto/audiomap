@@ -3,7 +3,7 @@
 // Pipeline: Fragmento de texto (Web Speech) → Gemini → Nodos JSON
 // Extrae conceptos de un stream de texto en tiempo real.
 // ══════════════════════════════════════════════════════════════════
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { parseGeminiResponse } from '../utils/textProcessor';
 
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY;
@@ -15,6 +15,7 @@ async function withRetry(fn, maxRetries = MAX_RETRIES) {
     try {
       return await fn();
     } catch (err) {
+      if (err.name === 'AbortError') throw err; // Don't retry aborted requests
       lastError = err;
       const delay = Math.pow(2, attempt) * 1000;
       await new Promise(r => setTimeout(r, delay));
@@ -24,7 +25,7 @@ async function withRetry(fn, maxRetries = MAX_RETRIES) {
 }
 
 // ── Clasificación semántica de fragmentos con Gemini ──────────────
-async function extractNodesWithGemini(textChunk, locale = 'es') {
+async function extractNodesWithGemini(textChunk, locale = 'es', signal) {
   const systemPrompt = locale === 'es'
     ? `Eres un asistente de mapas mentales en tiempo real. Analiza este nuevo fragmento de la conversación en curso.
 Extrae hasta 3 ideas clave o conceptos fuertes que acaben de mencionarse.
@@ -55,6 +56,7 @@ If nothing is relevant or it's filler text, return []. No extra text, only JSON.
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal,
     }
   );
 
@@ -81,9 +83,28 @@ If nothing is relevant or it's filler text, return []. No extra text, only JSON.
 export function useAIProcessor() {
   const [aiState, setAIState] = useState('idle'); // 'idle' | 'classifying' | 'done' | 'error'
   const [aiError, setAIError] = useState(null);
+  const abortControllerRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const processChunk = useCallback(async (textChunk, locale = 'es') => {
     if (!textChunk || textChunk.trim().length < 10) return []; // Ignorar fragmentos muy cortos
+    
+    // Cancelar cualquier petición anterior que siga en curso (Race condition)
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
     
     setAIError(null);
 
@@ -93,13 +114,20 @@ export function useAIProcessor() {
 
     try {
       setAIState('classifying');
-      const nodes = await withRetry(() => extractNodesWithGemini(textChunk, locale));
-      setAIState('done');
+      const nodes = await withRetry(() => extractNodesWithGemini(textChunk, locale, abortController.signal));
+      if (isMountedRef.current) {
+        setAIState('done');
+      }
       return nodes;
     } catch (err) {
+      if (err.name === 'AbortError') {
+        return []; // Ignorar abortos intencionales
+      }
       console.error("[AI] Error procesando chunk:", err);
-      setAIError('gemini');
-      setAIState('error');
+      if (isMountedRef.current) {
+        setAIError('gemini');
+        setAIState('error');
+      }
       return [];
     }
   }, []);

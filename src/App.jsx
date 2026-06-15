@@ -44,7 +44,7 @@ export default function App() {
   } = useAIProcessor();
 
   const {
-    nodes, setNodes,
+    nodes, setNodes, setNodesAndCommit,
     activeNodeId, setActiveNodeId,
     editingNodeId, setEditingNodeId,
     isDragging,
@@ -58,6 +58,13 @@ export default function App() {
     saveState, currentMapId, setCurrentMapId,
     autoSave, loadMap, loadSharedMap, generateShareLink,
   } = useFirestore(user?.uid);
+
+  // ── Auto-guardado en segundo plano ─────────────────────────────
+  useEffect(() => {
+    if (nodes.length > 0) {
+      autoSave(nodes);
+    }
+  }, [nodes, autoSave]);
 
   // ── Observador de autenticación ──────────────────────────────
   useEffect(() => {
@@ -102,7 +109,7 @@ export default function App() {
       
       processChunk(newText, locale).then(newNodes => {
         if (newNodes && newNodes.length > 0) {
-          setNodes(prevNodes => {
+          setNodesAndCommit(prevNodes => {
             const updated = [...prevNodes];
             const rootId = rootNodeIdRef.current || prevNodes[0]?.id;
             const rootNode = prevNodes.find(n => n.id === rootId);

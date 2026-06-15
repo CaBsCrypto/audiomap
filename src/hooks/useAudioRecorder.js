@@ -28,6 +28,7 @@ export function useAudioRecorder(canvasRef) {
 
   // ── Simulador visual de onda sonora ──────────────────────────────
   const startVisualizer = useCallback(() => {
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -106,14 +107,21 @@ export function useAudioRecorder(canvasRef) {
       console.warn("Speech Recognition Error:", event.error);
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         setHardwareError(true);
+        isRecordingRef.current = false;
+        setRecordingState('idle');
+        stopVisualizer();
       }
     };
 
     recognition.onend = () => {
       if (isRecordingRef.current) {
-        try {
-          recognition.start();
-        } catch(e) {}
+        setTimeout(() => {
+          if (isRecordingRef.current) {
+            try {
+              recognition.start();
+            } catch(e) {}
+          }
+        }, 1000); // Backoff for 1 second to avoid infinite freeze
       }
     };
 
