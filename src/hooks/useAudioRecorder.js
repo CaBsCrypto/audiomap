@@ -13,7 +13,7 @@ const COLORS = {
   amber:      '#f59e0b',
 };
 
-export function useAudioRecorder(canvasRef) {
+export function useAudioRecorder(canvasRef, canvasRefMobile) {
   const [recordingState, setRecordingState] = useState('idle'); // 'idle' | 'recording' | 'processing'
   const [transcription, setTranscription] = useState(''); // Texto final confirmado
   const [interimTranscript, setInterimTranscript] = useState(''); // Texto parcial mientras habla
@@ -29,36 +29,37 @@ export function useAudioRecorder(canvasRef) {
   // ── Simulador visual de onda sonora ──────────────────────────────
   const startVisualizer = useCallback(() => {
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
     let angle = 0;
     
     const draw = () => {
       if (!isRecordingRef.current) return;
       animationFrameRef.current = requestAnimationFrame(draw);
       
-      ctx.fillStyle = COLORS.panelBg;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.beginPath();
-      ctx.strokeStyle = COLORS.indigoGlow;
-      ctx.lineWidth = 2.5;
-      
-      for (let x = 0; x < canvas.width; x++) {
-        const amplitude = Math.random() * 15 + 10; 
-        const y = canvas.height / 2 + Math.sin(x * 0.05 + angle) * amplitude;
-        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      }
-      ctx.stroke();
+      const canvases = [canvasRef.current, canvasRefMobile?.current].filter(Boolean);
+      canvases.forEach(canvas => {
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = COLORS.panelBg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.indigoGlow;
+        ctx.lineWidth = 2.5;
+        
+        for (let x = 0; x < canvas.width; x++) {
+          const amplitude = Math.random() * 15 + 10; 
+          const y = canvas.height / 2 + Math.sin(x * 0.05 + angle) * amplitude;
+          x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      });
       angle += 0.15;
     };
     draw();
-  }, [canvasRef]);
+  }, [canvasRef, canvasRefMobile]);
 
   const stopVisualizer = useCallback(() => {
     cancelAnimationFrame(animationFrameRef.current);
-    const canvas = canvasRef.current;
-    if (canvas) {
+    const canvases = [canvasRef.current, canvasRefMobile?.current].filter(Boolean);
+    canvases.forEach(canvas => {
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = COLORS.panelBg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -67,8 +68,8 @@ export function useAudioRecorder(canvasRef) {
       ctx.moveTo(0, canvas.height / 2);
       ctx.lineTo(canvas.width, canvas.height / 2);
       ctx.stroke();
-    }
-  }, [canvasRef]);
+    });
+  }, [canvasRef, canvasRefMobile]);
 
   // ── Inicializar Speech Recognition ──────────────────────────────
   useEffect(() => {

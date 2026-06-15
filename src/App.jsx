@@ -13,6 +13,7 @@ import LoginScreen          from './components/auth/LoginScreen';
 import LeftPanel            from './components/layout/LeftPanel';
 import CanvasPanel          from './components/layout/CanvasPanel';
 import MyMapsList           from './components/layout/MyMapsList';
+import { Mic, Square }      from 'lucide-react';
 
 function getShareId() {
   const params = new URLSearchParams(window.location.search);
@@ -26,6 +27,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const canvasRef = useRef(null);
+  const canvasRefMobile = useRef(null);
   const svgRef    = useRef(null);
 
   const [showMyMaps, setShowMyMaps] = useState(false);
@@ -37,7 +39,7 @@ export default function App() {
     recordingState, setRecordingState,
     transcription, interimTranscript, hardwareError,
     startRecording, stopRecording,
-  } = useAudioRecorder(canvasRef);
+  } = useAudioRecorder(canvasRef, canvasRefMobile);
 
   const {
     aiState, aiError,
@@ -237,20 +239,8 @@ export default function App() {
           />
         </div>
 
-        {/* Barra superior móvil */}
-        <div className="md:hidden absolute top-0 left-0 right-0 p-4 flex justify-between items-start pointer-events-none z-10">
-          <button 
-            className="pointer-events-auto p-2 bg-slate-800/80 backdrop-blur border border-slate-700 rounded-xl"
-            onClick={() => setIsSidebarOpen(true)}
-          >
-            <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16"/>
-            </svg>
-          </button>
-        </div>
-
-        {/* Menú de Acciones Inferior */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-2 bg-slate-900/80 backdrop-blur-md border border-slate-700/50 rounded-2xl shadow-2xl pointer-events-auto z-10">
+        {/*        {/* Menú de Acciones Inferior */}
+        <div className="absolute bottom-[22vh] md:bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-2 bg-slate-900/80 backdrop-blur-md border border-slate-700/50 rounded-2xl shadow-2xl pointer-events-auto z-10">
           <button 
             onClick={resetMap}
             className="p-3 text-slate-400 hover:text-red-400 hover:bg-slate-800/50 rounded-xl transition-colors"
@@ -277,7 +267,7 @@ export default function App() {
             className="p-3 text-slate-400 hover:text-white disabled:opacity-30 rounded-xl transition-colors"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m-6-6l-6-6" />
             </svg>
           </button>
 
@@ -294,12 +284,64 @@ export default function App() {
         </div>
       </div>
 
+      {/* ── Contenedor del Micrófono Móvil (20% alto) ── */}
+      <div 
+        className="md:hidden fixed bottom-0 left-0 right-0 h-[20vh] border-t border-slate-800/80 bg-slate-950/90 backdrop-blur-md z-30 flex flex-col p-3.5 pointer-events-auto"
+      >
+        <div className="flex items-center justify-between gap-4 h-12 shrink-0">
+          {/* Visualizador de Onda Móvil */}
+          <div className="relative flex-1 h-10 border border-slate-800 bg-slate-900 rounded-xl overflow-hidden">
+            <canvas ref={canvasRefMobile} className="absolute inset-0 w-full h-full" width={220} height={40} />
+            {recordingState === 'recording' && (
+              <div className="absolute top-1 left-2.5 flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[8px] font-bold text-red-400 tracking-wider">LIVE</span>
+              </div>
+            )}
+            {aiState === 'classifying' && (
+              <div className="absolute top-1 right-2.5 flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full border border-indigo-400 border-t-transparent animate-spin" />
+              </div>
+            )}
+          </div>
+
+          {/* Botón de Micrófono flotante */}
+          <button
+            onClick={recordingState === 'recording' ? handleStopRecording : startRecording}
+            className={`
+              flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 shadow-lg shrink-0
+              ${recordingState === 'recording' 
+                ? 'bg-red-500/10 text-red-400 border border-red-500/40 animate-pulse' 
+                : 'bg-indigo-600 text-white hover:bg-indigo-505'
+              }
+            `}
+          >
+            {recordingState === 'recording' ? <Square size={16} className="fill-current" /> : <Mic size={18} />}
+          </button>
+        </div>
+
+        {/* Transcripción en tiempo real */}
+        <div className="flex-1 mt-2.5 overflow-y-auto font-mono text-[10px] text-slate-400 leading-normal">
+          {transcription || interimTranscript ? (
+            <p className="break-words">
+              {transcription}
+              <span className="text-slate-600 italic ml-1">{interimTranscript}</span>
+            </p>
+          ) : (
+            <p className="text-slate-600 text-center mt-1.5">Presiona el micrófono y empieza a hablar...</p>
+          )}
+        </div>
+      </div>
+
       {/* ── Modal: Mis Mapas ── */}
       {showMyMaps && (
         <MyMapsList
-          uid={user?.uid}
           onClose={() => setShowMyMaps(false)}
-          onLoad={(nodes) => { loadFromJSON(nodes); setShowMyMaps(false); }}
+          listMaps={listMaps}
+          loadMap={loadMap}
+          deleteMap={deleteMap}
+          currentMapId={currentMapId}
+          loadFromJSON={loadFromJSON}
         />
       )}
     </div>
