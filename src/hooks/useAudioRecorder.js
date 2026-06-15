@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════════════════════════
-// HOOK: useAudioRecorder — ENJAMBRE 4: Backend/Audio Engine
-// Gestiona MediaRecorder, Web Audio API y Canvas de waveform
+// HOOK: useAudioRecorder — ENJAMBRE 4: Backend/Audio Engine (Live Speech)
+// Utiliza Web Speech API (webkitSpeechRecognition) para transcripción
+// continua y en vivo, eliminando el costo y retardo de Whisper.
 // ══════════════════════════════════════════════════════════════════
 import { useState, useRef, useCallback, useEffect } from 'react';
 
@@ -13,165 +14,161 @@ const COLORS = {
 };
 
 export function useAudioRecorder(canvasRef) {
-  const [recordingState, setRecordingState] = useState('idle');
-  // 'idle' | 'recording' | 'processing'
-  const [audioURL,       setAudioURL]       = useState(null);
-  const [audioBlob,      setAudioBlob]      = useState(null);
-  const [hardwareError,  setHardwareError]  = useState(false);
+  const [recordingState, setRecordingState] = useState('idle'); // 'idle' | 'recording' | 'processing'
+  const [transcription, setTranscription] = useState(''); // Texto final confirmado
+  const [interimTranscript, setInterimTranscript] = useState(''); // Texto parcial mientras habla
+  const [hardwareError, setHardwareError] = useState(false);
 
-  const audioContextRef   = useRef(null);
-  const analyserRef       = useRef(null);
-  const mediaRecorderRef  = useRef(null);
-  const audioChunksRef    = useRef([]);
+  const recognitionRef = useRef(null);
+  const isRecordingRef = useRef(false);
+  const fullTranscriptRef = useRef(''); // Ref para evitar problemas de dependencias en callbacks
+
+  // Simulador visual de ondas (ya que no capturamos stream de audio crudo)
   const animationFrameRef = useRef(null);
-  const streamRef         = useRef(null);
 
-  // ── Limpieza al desmontar ──────────────────────────────────────
-  useEffect(() => {
-    return () => {
-      cancelAnimationFrame(animationFrameRef.current);
-      audioContextRef.current?.close();
-      streamRef.current?.getTracks().forEach(t => t.stop());
-    };
-  }, []);
-
-  // ── Visualizador FFT con gradiente neón ───────────────────────
-  const drawWaveform = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !analyserRef.current) return;
-
-    const ctx         = canvas.getContext('2d');
-    const bufferLen   = analyserRef.current.frequencyBinCount;
-    const dataArray   = new Uint8Array(bufferLen);
-    const barWidth    = (canvas.width / bufferLen) * 2.5;
-
-    const draw = () => {
-      animationFrameRef.current = requestAnimationFrame(draw);
-      analyserRef.current.getByteFrequencyData(dataArray);
-
-      ctx.fillStyle = COLORS.panelBg;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      let x = 0;
-      for (let i = 0; i < bufferLen; i++) {
-        const barHeight = dataArray[i] / 1.8;
-        const gradient  = ctx.createLinearGradient(0, canvas.height, 0, 0);
-        gradient.addColorStop(0,   COLORS.border);
-        gradient.addColorStop(0.5, COLORS.indigo);
-        gradient.addColorStop(1,   COLORS.indigoGlow);
-        ctx.fillStyle = gradient;
-        ctx.fillRect(x, canvas.height - barHeight, barWidth - 2, barHeight);
-        x += barWidth;
-      }
-    };
-    draw();
-  }, [canvasRef]);
-
-  // ── Fallback visual cuando no hay micrófono ───────────────────
-  const simulateFallbackWaveform = useCallback(() => {
+  // ── Simulador visual de onda sonora ──────────────────────────────
+  const startVisualizer = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let angle = 0;
-    let active = true;
-
-    const simulate = () => {
-      if (!active) return;
-      animationFrameRef.current = requestAnimationFrame(simulate);
+    
+    const draw = () => {
+      if (!isRecordingRef.current) return;
+      animationFrameRef.current = requestAnimationFrame(draw);
+      
       ctx.fillStyle = COLORS.panelBg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.beginPath();
-      ctx.strokeStyle = COLORS.amber;
-      ctx.lineWidth   = 2.5;
+      ctx.strokeStyle = COLORS.indigoGlow;
+      ctx.lineWidth = 2.5;
+      
       for (let x = 0; x < canvas.width; x++) {
-        const y = canvas.height / 2 + Math.sin(x * 0.05 + angle) * (Math.random() * 12 + 6);
+        const amplitude = Math.random() * 15 + 10; 
+        const y = canvas.height / 2 + Math.sin(x * 0.05 + angle) * amplitude;
         x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.stroke();
-      angle += 0.08;
+      angle += 0.15;
     };
-    simulate();
-
-    // Simula 5s de "grabación" y luego llama a onstop
-    setTimeout(() => {
-      active = false;
-      cancelAnimationFrame(animationFrameRef.current);
-    }, 5000);
+    draw();
   }, [canvasRef]);
 
-  // ── Inicio de grabación ───────────────────────────────────────
-  const startRecording = useCallback(async () => {
-    setHardwareError(false);
+  const stopVisualizer = useCallback(() => {
     cancelAnimationFrame(animationFrameRef.current);
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      analyserRef.current     = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 256;
-      audioContextRef.current.createMediaStreamSource(stream).connect(analyserRef.current);
-
-      audioChunksRef.current  = [];
-      mediaRecorderRef.current = new MediaRecorder(stream);
-
-      mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      mediaRecorderRef.current.start();
-      setRecordingState('recording');
-      drawWaveform();
-    } catch (err) {
-      console.error('[AudioRecorder] Mic error:', err);
-      setHardwareError(true);
-      setRecordingState('recording'); // permite continuar con simulación
-      simulateFallbackWaveform();
-    }
-  }, [drawWaveform, simulateFallbackWaveform]);
-
-  // ── Detención de grabación ────────────────────────────────────
-  const stopRecording = useCallback(() => {
-    cancelAnimationFrame(animationFrameRef.current);
-    setRecordingState('processing');
-
-    return new Promise((resolve) => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.onstop = () => {
-          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          const url  = URL.createObjectURL(blob);
-          setAudioBlob(blob);
-          setAudioURL(url);
-          audioContextRef.current?.close();
-          streamRef.current?.getTracks().forEach(t => t.stop());
-          resolve(blob);
-        };
-        mediaRecorderRef.current.stop();
-      } else {
-        // Fallback: no había grabación real
-        resolve(null);
-      }
-    });
-  }, []);
-
-  // ── Clear del canvas ──────────────────────────────────────────
-  const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = COLORS.panelBg;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = COLORS.panelBg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      ctx.strokeStyle = COLORS.border;
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+    }
   }, [canvasRef]);
+
+  // ── Inicializar Speech Recognition ──────────────────────────────
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.error("Web Speech API no es compatible con este navegador.");
+      setHardwareError(true);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'es-ES'; 
+    
+    recognition.onresult = (event) => {
+      let currentInterim = '';
+      let newFinal = '';
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          newFinal += event.results[i][0].transcript + ' ';
+        } else {
+          currentInterim += event.results[i][0].transcript;
+        }
+      }
+
+      if (newFinal) {
+        fullTranscriptRef.current += newFinal;
+        setTranscription(fullTranscriptRef.current);
+      }
+      setInterimTranscript(currentInterim);
+    };
+
+    recognition.onerror = (event) => {
+      console.warn("Speech Recognition Error:", event.error);
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setHardwareError(true);
+      }
+    };
+
+    recognition.onend = () => {
+      if (isRecordingRef.current) {
+        try {
+          recognition.start();
+        } catch(e) {}
+      }
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      stopVisualizer();
+      isRecordingRef.current = false;
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch(e) {}
+      }
+    };
+  }, [startVisualizer, stopVisualizer]);
+
+  // ── Acciones de UI ──────────────────────────────────────────────
+  const startRecording = useCallback(async () => {
+    if (!recognitionRef.current || hardwareError) {
+      console.error("Hardware no disponible para grabar.");
+      return;
+    }
+    setTranscription('');
+    setInterimTranscript('');
+    fullTranscriptRef.current = '';
+    
+    isRecordingRef.current = true;
+    setRecordingState('recording');
+    
+    try {
+      recognitionRef.current.start();
+      startVisualizer();
+    } catch (err) {
+      console.warn("Recognition ya estaba corriendo");
+    }
+  }, [startVisualizer, hardwareError]);
+
+  const stopRecording = useCallback(async () => {
+    isRecordingRef.current = false;
+    setRecordingState('processing'); 
+    stopVisualizer();
+    
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch(e) {}
+    }
+    
+    const finalResult = fullTranscriptRef.current + interimTranscript;
+    setInterimTranscript('');
+    
+    return finalResult;
+  }, [stopVisualizer, interimTranscript]);
 
   return {
-    recordingState,
-    setRecordingState,
-    audioURL,
-    audioBlob,
+    recordingState, setRecordingState,
+    transcription,
+    interimTranscript,
     hardwareError,
-    startRecording,
-    stopRecording,
-    clearCanvas,
+    startRecording, stopRecording
   };
 }

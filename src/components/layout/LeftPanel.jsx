@@ -1,88 +1,68 @@
 // ══════════════════════════════════════════════════════════════════
 // COMPONENTE: LeftPanel — ENJAMBRE 1: Diseño
-// Panel lateral: grabación, waveform, transcripción, audio player
+// Panel lateral estilo Obsidian: Muro de texto continuo y controles
 // ══════════════════════════════════════════════════════════════════
-import React from 'react';
-import { Mic, Square, LogOut, User, Folder, X } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { Mic, Square, LogOut, User, Folder, X, Radio } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../config/firebase';
-import { useI18n } from '../../hooks/useI18n';
-import HardwareAlert from '../ui/HardwareAlert';
-import StatusBadge   from '../ui/StatusBadge';
-import LanguageToggle from '../ui/LanguageToggle';
 
 export default function LeftPanel({
-  isOpen,
-  setIsOpen,
-  user,
-  canvasRef,
+  t,
   recordingState,
-  audioURL,
-  hardwareError,
-  aiState,
-  retryInfo,
+  startRecording,
+  stopRecording,
   transcription,
-  onStartRecording,
-  onStopRecording,
-  onOpenMyMaps,
+  interimTranscript,
+  aiState,
+  canvasRef,
+  user,
+  onToggleMyMaps,
+  onToggleSidebar,
 }) {
-  const { t } = useI18n();
+  const isRecording = recordingState === 'recording';
+  const textEndRef = useRef(null);
 
-  const isRecording  = recordingState === 'recording';
-  const isBusy       = ['processing', 'transcribing', 'classifying'].includes(recordingState) ||
-                       ['transcribing', 'classifying'].includes(aiState);
-  const displayState = ['transcribing', 'classifying'].includes(aiState) ? aiState : recordingState;
+  // Auto-scroll al final del texto cuando hay transcripción nueva
+  useEffect(() => {
+    if (textEndRef.current) {
+      textEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [transcription, interimTranscript]);
 
   return (
-    <>
-      {/* ── Overlay Móvil ────────────────────────────────────────── */}
-      {isOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 md:hidden animate-fade-up"
-          onClick={() => setIsOpen(false)}
-        />
-      )}
-
-      <aside
-        className={`
-          w-[360px] max-w-[90vw] h-full flex flex-col border-r border-slate-800 z-50 overflow-y-auto
-          absolute md:relative transform transition-transform duration-300
-          ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-        `}
-        style={{ backgroundColor: '#0f172a' }}
-      >
-        {/* ── Header ───────────────────────────────────────────────── */}
-        <div className="p-5 border-b border-slate-800 flex items-start justify-between shrink-0">
-          <div>
-            <h1 className="text-xl font-extrabold tracking-tight gradient-text">{t('app.name')}</h1>
-            <p className="text-[11px] text-slate-500 mt-0.5">{t('app.tagline')}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button 
-              className="md:hidden p-1.5 text-slate-400 hover:text-slate-200"
-              onClick={() => setIsOpen(false)}
-            >
-              <X size={18} />
-            </button>
-            <LanguageToggle />
-            {user && (
+    <aside
+      className="w-[380px] max-w-[90vw] h-full flex flex-col border-r border-slate-800 shadow-2xl z-50 bg-slate-950"
+    >
+      {/* ── Header ───────────────────────────────────────────────── */}
+      <div className="p-5 border-b border-slate-800 flex items-start justify-between shrink-0 bg-slate-900/50">
+        <div>
+          <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">AudioMap IA</h1>
+          <p className="text-[11px] text-slate-500 mt-0.5">Obsidian Live Mode</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {user && (
             <button
-              id="btn-logout"
               onClick={() => signOut(auth)}
-              className="btn-icon text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+              className="p-2 text-slate-500 hover:text-slate-300 hover:bg-slate-800 rounded-lg transition-colors"
               title="Cerrar sesión"
             >
-              <LogOut size={15} />
+              <LogOut size={16} />
             </button>
           )}
+          <button 
+            className="md:hidden p-2 text-slate-400 hover:text-slate-200"
+            onClick={onToggleSidebar}
+          >
+            <X size={18} />
+          </button>
         </div>
       </div>
 
-      <div className="flex flex-col gap-5 p-5 flex-1">
-
-        {/* ── Avatar de usuario ─────────────────────────────────── */}
-        {user && (
-          <div className="flex items-center justify-between p-3 rounded-xl border border-slate-800 bg-slate-950/40">
+      {/* ── Usuario y Mis Mapas ────────────────────────────────── */}
+      {user && (
+        <div className="p-4 border-b border-slate-800 shrink-0">
+          <div className="flex items-center justify-between p-3 rounded-xl border border-slate-800/80 bg-slate-900/40">
             <div className="flex items-center gap-3 min-w-0">
               {user.photoURL ? (
                 <img src={user.photoURL} alt={user.displayName} className="w-8 h-8 rounded-full ring-2 ring-indigo-500/30 shrink-0" />
@@ -93,135 +73,79 @@ export default function LeftPanel({
               )}
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-slate-200 truncate">{user.displayName || 'Usuario'}</p>
-                <p className="text-[10px] text-slate-500 truncate">{user.email}</p>
               </div>
             </div>
             <button
-              onClick={onOpenMyMaps}
-              className="p-2 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors shrink-0"
-              title="Mis Mapas Guardados"
+              onClick={onToggleMyMaps}
+              className="p-2 text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors flex items-center gap-2"
+              title="Mis Mapas"
             >
-              <Folder size={16} />
+              <Folder size={15} />
             </button>
           </div>
-        )}
-
-        {/* ── Sección de Grabación ─────────────────────────────── */}
-        <div className="panel-section shrink-0">
-          <div className="panel-header">
-            <span>{t('recorder.label')}</span>
-            <StatusBadge state={displayState} t={t} />
-          </div>
-
-          {/* Canvas de waveform */}
-          <div className="relative bg-slate-950" style={{ height: '80px' }}>
-            <canvas
-              ref={canvasRef}
-              width={320}
-              height={80}
-              className="w-full h-full block"
-              aria-label="Visualizador de forma de onda de audio"
-            />
-            {/* Overlay de estado cuando no está grabando */}
-            {!isRecording && recordingState === 'idle' && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="flex gap-1">
-                  {Array.from({ length: 20 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="w-1 rounded-full bg-slate-700"
-                      style={{ height: `${8 + Math.sin(i * 0.7) * 6}px` }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Controles de grabación */}
-          <div className="p-4 flex justify-center gap-3 bg-slate-950/50">
-            {!isRecording && !isBusy ? (
-              <button
-                id="btn-start-recording"
-                onClick={onStartRecording}
-                className="btn-primary"
-              >
-                <Mic size={15} />
-                <span>{t('recorder.start')}</span>
-              </button>
-            ) : isRecording ? (
-              <button
-                id="btn-stop-recording"
-                onClick={onStopRecording}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500
-                           active:scale-95 transition-all rounded-xl font-medium text-sm
-                           shadow-lg shadow-red-500/20 text-white"
-              >
-                <Square size={15} />
-                <span>{t('recorder.stop')}</span>
-              </button>
-            ) : (
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                <span className="text-xs text-slate-400">
-                  {retryInfo
-                    ? `Reintentando ${retryInfo.attempt}/${retryInfo.max}...`
-                    : t(`recorder.${aiState}`) || t('recorder.processing')}
-                </span>
-              </div>
-            )}
-          </div>
         </div>
+      )}
 
-        {/* ── Alerta de hardware ──────────────────────────────── */}
-        {hardwareError && <HardwareAlert />}
-
-        {/* ── Reproductor de audio ─────────────────────────────── */}
-        {audioURL && (
-          <div className="panel-section shrink-0">
-            <div className="panel-header">
-              <span>{t('audio.label')}</span>
-            </div>
-            <div className="p-3">
-              <audio
-                src={audioURL}
-                controls
-                className="w-full h-8 accent-indigo-500"
-                style={{ colorScheme: 'dark' }}
-              />
-            </div>
+      {/* ── Visualizador de Onda ─────────────────────────────────── */}
+      <div className="relative h-20 w-full shrink-0 border-b border-slate-800 bg-slate-900 overflow-hidden">
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" width={380} height={80} />
+        {isRecording && (
+          <div className="absolute top-2 left-3 flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-[10px] uppercase font-bold text-red-400 tracking-wider">LIVE</span>
           </div>
         )}
-
-        {/* ── Transcripción ────────────────────────────────────── */}
-        <div className="panel-section flex-1 min-h-0 flex flex-col">
-          <div className="panel-header shrink-0">
-            <span>{t('transcription.label')}</span>
-            {transcription && (
-              <span className="text-emerald-500 text-[10px] flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                Live
-              </span>
-            )}
+        {aiState === 'classifying' && (
+          <div className="absolute top-2 right-3 flex items-center gap-2">
+            <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Procesando Nodos...</span>
+            <div className="w-3 h-3 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
           </div>
-          <div className="p-4 overflow-y-auto flex-1 text-xs leading-relaxed text-slate-300 font-mono">
-            {transcription ? (
-              <span>{transcription}</span>
-            ) : (
-              <span className="text-slate-600 italic">{t('transcription.empty')}</span>
-            )}
-          </div>
-        </div>
-
+        )}
       </div>
 
-      {/* ── Footer del panel ─────────────────────────────────────── */}
-      <div className="p-4 border-t border-slate-800 shrink-0">
-        <p className="text-[10px] text-slate-600 text-center font-mono">
-          {t('canvas.hint')}
+      {/* ── Muro de Texto (Obsidian Style) ───────────────────────── */}
+      <div className="flex-1 overflow-y-auto p-5 scroll-smooth font-mono text-sm leading-relaxed">
+        {transcription === '' && interimTranscript === '' ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-600 text-center space-y-4">
+            <Radio size={32} className="opacity-20" />
+            <p>Presiona el micrófono y empieza a hablar. Tu texto aparecerá aquí en tiempo real y el mapa crecerá solo.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-slate-300">
+              {transcription}
+              <span className="text-slate-500 italic ml-1">{interimTranscript}</span>
+              {isRecording && <span className="inline-block w-2 h-4 ml-1 bg-indigo-500 animate-pulse" />}
+            </p>
+            <div ref={textEndRef} />
+          </div>
+        )}
+      </div>
+
+      {/* ── Controles ────────────────────────────────────────────── */}
+      <div className="p-6 shrink-0 bg-slate-900/80 border-t border-slate-800 flex flex-col items-center gap-4">
+        <button
+          onClick={isRecording ? stopRecording : startRecording}
+          className={`
+            group relative flex items-center justify-center w-16 h-16 rounded-full transition-all duration-300 shadow-xl
+            ${isRecording 
+              ? 'bg-red-500/10 text-red-400 border-2 border-red-500/50 hover:bg-red-500/20 shadow-red-500/20' 
+              : 'bg-indigo-600 text-white hover:bg-indigo-500 hover:scale-105 shadow-indigo-600/30'
+            }
+          `}
+        >
+          {isRecording ? <Square size={24} className="fill-current" /> : <Mic size={26} />}
+          
+          {/* Anillos de radar */}
+          {!isRecording && (
+            <div className="absolute inset-0 rounded-full border border-indigo-400 opacity-0 group-hover:animate-ping" />
+          )}
+        </button>
+        <p className="text-xs font-medium text-slate-500 uppercase tracking-widest">
+          {isRecording ? 'Detener Sesión' : 'Iniciar Flujo'}
         </p>
       </div>
+
     </aside>
-    </>
   );
 }
