@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════════
 // HOOK: useAudioRecorder — ENJAMBRE 4: Backend/Audio Engine (Live Speech)
-// Utiliza OpenAI Whisper API con segmentación en clausuras aisladas
-// para prevenir race conditions y lograr transcripción de alta fidelidad.
+// Utiliza OpenAI Whisper API con segmentación en clausuras aisladas.
+// Corrige bugs de tipos MIME en iOS/Safari y añade telemetría en UI.
 // ══════════════════════════════════════════════════════════════════
 import { useState, useRef, useCallback, useEffect } from 'react';
 
@@ -19,7 +19,7 @@ const CHUNK_INTERVAL_MS = 8000; // Fraccionamiento de audio cada 8 segundos
 export function useAudioRecorder(canvasRef, canvasRefMobile) {
   const [recordingState, setRecordingState] = useState('idle'); // 'idle' | 'recording' | 'processing'
   const [transcription, setTranscription] = useState(''); // Texto final confirmado
-  const [interimTranscript, setInterimTranscript] = useState(''); // Estado temporal/errores
+  const [interimTranscript, setInterimTranscript] = useState(''); // Telemetría y estado actual
   const [hardwareError, setHardwareError] = useState(false);
 
   const currentRecorderRef = useRef(null);
@@ -73,7 +73,7 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
   const transcribeAudioChunk = async (audioBlob) => {
     if (!OPENAI_KEY || OPENAI_KEY.startsWith('sk-proj-xxxx') || OPENAI_KEY === '') {
       console.warn("[Whisper] Falta o es inválida la clave VITE_OPENAI_KEY.");
-      setInterimTranscript("Error: Falta clave OpenAI en configuración.");
+      setInterimTranscript("Error: Falta clave de OpenAI.");
       return;
     }
 
@@ -86,7 +86,7 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
     formData.append('language', 'es');
 
     try {
-      setInterimTranscript("Transcribiendo...");
+      setInterimTranscript("Transcribiendo voz a texto...");
       const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
@@ -106,13 +106,13 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
         const separator = fullTranscriptRef.current ? ' ' : '';
         fullTranscriptRef.current += separator + text;
         setTranscription(fullTranscriptRef.current);
-        setInterimTranscript('');
+        setInterimTranscript("Escuchando... (habla ahora)");
       } else {
-        setInterimTranscript('');
+        setInterimTranscript("Escuchando... (silencio detectado)");
       }
     } catch (err) {
       console.error("[Whisper] Error en la transcripción:", err);
-      setInterimTranscript(`Error: ${err.message}`);
+      setInterimTranscript(`Error traducción: ${err.message}`);
     }
   };
 
@@ -122,18 +122,24 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
       setHardwareError(false);
       fullTranscriptRef.current = '';
       setTranscription('');
-      setInterimTranscript('Iniciando micrófono...');
+      setInterimTranscript('Solicitando permiso de micrófono...');
       
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      let options = { mimeType: 'audio/webm' };
-      if (!MediaRecorder.isTypeSupported('audio/webm')) {
+      // Detección segura de iOS/Safari
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || 
+                       /iPad|iPhone|iPod/.test(navigator.platform) ||
+                       (navigator.maxTouchPoints && navigator.maxTouchPoints > 2);
+
+      let options = {};
+      if (!isSafari && MediaRecorder.isTypeSupported('audio/webm')) {
+        options = { mimeType: 'audio/webm' };
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
         options = { mimeType: 'audio/mp4' };
-        if (!MediaRecorder.isTypeSupported('audio/mp4')) {
-          options = {};
-        }
       }
+
+      console.log("[Audio] Iniciando grabador con opciones:", options);
 
       isRecordingRef.current = true;
       setRecordingState('recording');
@@ -142,8 +148,16 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
       const recordNextChunk = () => {
         if (!isRecordingRef.current || !streamRef.current) return;
 
+        setInterimTranscript("Escuchando... (habla ahora)");
         const chunks = [];
-        const recorder = new MediaRecorder(streamRef.current, options);
+        let recorder;
+        try {
+          recorder = new MediaRecorder(streamRef.current, options);
+        } catch (e) {
+          console.warn("[Audio] Error instanciando con codec, reintentando con default nativo", e);
+          recorder = new MediaRecorder(streamRef.current); // Fallback absoluto
+        }
+        
         currentRecorderRef.current = recorder;
 
         recorder.ondataavailable = (event) => {
@@ -153,12 +167,14 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
         };
 
         recorder.onstop = () => {
+          setInterimTranscript("Procesando bloque de audio...");
           const audioBlob = new Blob(chunks, { type: recorder.mimeType });
-          if (audioBlob.size > 1000) {
+          console.log("[Audio] Blob generado, tamaño:", audioBlob.size, "mime:", audioBlob.type);
+          
+          if (audioBlob.size > 0) {
             transcribeAudioChunk(audioBlob);
           }
           
-          // Encadenar la siguiente grabación si sigue activo
           if (isRecordingRef.current) {
             recordNextChunk();
           }
@@ -174,14 +190,13 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
         }, CHUNK_INTERVAL_MS);
       };
 
-      // Arrancar el primer segmento
       recordNextChunk();
 
     } catch (err) {
-      console.error("[Audio] No se pudo acceder al micrófono:", err);
+      console.error("[Audio] No se pudo acceder al micrófono o iniciar:", err);
       setHardwareError(true);
       setRecordingState('idle');
-      setInterimTranscript(`Error mic: ${err.message}`);
+      setInterimTranscript(`Error inicialización: ${err.message}`);
     }
   }, [startVisualizer]);
 
