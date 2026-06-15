@@ -1,7 +1,7 @@
 // ══════════════════════════════════════════════════════════════════
 // HOOK: useAudioRecorder — ENJAMBRE 4: Backend/Audio Engine (Live Speech)
-// Utiliza OpenAI Whisper API para transcripción continua en bloques,
-// logrando una precisión profesional compatible con cualquier navegador móvil.
+// Utiliza OpenAI Whisper API con segmentación en clausuras aisladas
+// para prevenir race conditions y lograr transcripción de alta fidelidad.
 // ══════════════════════════════════════════════════════════════════
 import { useState, useRef, useCallback, useEffect } from 'react';
 
@@ -14,21 +14,20 @@ const COLORS = {
 };
 
 const OPENAI_KEY = import.meta.env.VITE_OPENAI_KEY;
-const CHUNK_INTERVAL_MS = 8000; // Rotación de audio cada 8 segundos
+const CHUNK_INTERVAL_MS = 8000; // Fraccionamiento de audio cada 8 segundos
 
 export function useAudioRecorder(canvasRef, canvasRefMobile) {
   const [recordingState, setRecordingState] = useState('idle'); // 'idle' | 'recording' | 'processing'
   const [transcription, setTranscription] = useState(''); // Texto final confirmado
-  const [interimTranscript, setInterimTranscript] = useState(''); // Texto parcial simulado (compatible)
+  const [interimTranscript, setInterimTranscript] = useState(''); // Estado temporal/errores
   const [hardwareError, setHardwareError] = useState(false);
 
-  const mediaRecorderRef = useRef(null);
+  const currentRecorderRef = useRef(null);
   const streamRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const intervalIdRef = useRef(null);
   const isRecordingRef = useRef(false);
   const fullTranscriptRef = useRef('');
   const animationFrameRef = useRef(null);
+  const timeoutIdRef = useRef(null);
 
   // ── Simulador visual de onda sonora ──────────────────────────────
   const startVisualizer = useCallback(() => {
@@ -74,6 +73,7 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
   const transcribeAudioChunk = async (audioBlob) => {
     if (!OPENAI_KEY || OPENAI_KEY.startsWith('sk-proj-xxxx') || OPENAI_KEY === '') {
       console.warn("[Whisper] Falta o es inválida la clave VITE_OPENAI_KEY.");
+      setInterimTranscript("Error: Falta clave OpenAI en configuración.");
       return;
     }
 
@@ -86,6 +86,7 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
     formData.append('language', 'es');
 
     try {
+      setInterimTranscript("Transcribiendo...");
       const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: {
@@ -95,35 +96,37 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
       });
 
       if (!response.ok) {
-        throw new Error(`Whisper HTTP status ${response.status}`);
+        const errorText = await response.text();
+        throw new Error(`Status ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
       const text = data.text?.trim();
       if (text) {
-        // Concatenar al historial de transcripción
         const separator = fullTranscriptRef.current ? ' ' : '';
         fullTranscriptRef.current += separator + text;
         setTranscription(fullTranscriptRef.current);
+        setInterimTranscript('');
+      } else {
+        setInterimTranscript('');
       }
     } catch (err) {
       console.error("[Whisper] Error en la transcripción:", err);
+      setInterimTranscript(`Error: ${err.message}`);
     }
   };
 
-  // ── Iniciar Grabación ───────────────────────────────────────────
+  // ── Iniciar Grabación Recursiva por Bloques ──────────────────────
   const startRecording = useCallback(async () => {
     try {
       setHardwareError(false);
-      audioChunksRef.current = [];
       fullTranscriptRef.current = '';
       setTranscription('');
-      setInterimTranscript('');
+      setInterimTranscript('Iniciando micrófono...');
       
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Selección de códec compatible
       let options = { mimeType: 'audio/webm' };
       if (!MediaRecorder.isTypeSupported('audio/webm')) {
         options = { mimeType: 'audio/mp4' };
@@ -132,64 +135,53 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
         }
       }
 
-      const mediaRecorder = new MediaRecorder(stream, options);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorder.mimeType });
-        audioChunksRef.current = [];
-        if (audioBlob.size > 1000) {
-          transcribeAudioChunk(audioBlob);
-        }
-      };
-
       isRecordingRef.current = true;
       setRecordingState('recording');
       startVisualizer();
-      
-      mediaRecorder.start();
 
-      // Bucle de rotación de chunks de audio cada 8 segundos
-      intervalIdRef.current = setInterval(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-          // Detener el recorder actual dispara onstop y envía el buffer a Whisper
-          mediaRecorderRef.current.stop();
-          
-          // Arrancar de inmediato el siguiente recorder con el mismo stream nativo
-          if (isRecordingRef.current && streamRef.current) {
-            try {
-              const nextRecorder = new MediaRecorder(streamRef.current, options);
-              mediaRecorderRef.current = nextRecorder;
-              nextRecorder.ondataavailable = (event) => {
-                if (event.data && event.data.size > 0) {
-                  audioChunksRef.current.push(event.data);
-                }
-              };
-              nextRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunksRef.current, { type: nextRecorder.mimeType });
-                audioChunksRef.current = [];
-                if (audioBlob.size > 1000) {
-                  transcribeAudioChunk(audioBlob);
-                }
-              };
-              nextRecorder.start();
-            } catch (e) {
-              console.error("[Audio] Error rotando MediaRecorder:", e);
-            }
+      const recordNextChunk = () => {
+        if (!isRecordingRef.current || !streamRef.current) return;
+
+        const chunks = [];
+        const recorder = new MediaRecorder(streamRef.current, options);
+        currentRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            chunks.push(event.data);
           }
-        }
-      }, CHUNK_INTERVAL_MS);
+        };
+
+        recorder.onstop = () => {
+          const audioBlob = new Blob(chunks, { type: recorder.mimeType });
+          if (audioBlob.size > 1000) {
+            transcribeAudioChunk(audioBlob);
+          }
+          
+          // Encadenar la siguiente grabación si sigue activo
+          if (isRecordingRef.current) {
+            recordNextChunk();
+          }
+        };
+
+        recorder.start();
+
+        // Limitar la duración de este chunk a 8 segundos
+        timeoutIdRef.current = setTimeout(() => {
+          if (recorder.state === 'recording') {
+            recorder.stop();
+          }
+        }, CHUNK_INTERVAL_MS);
+      };
+
+      // Arrancar el primer segmento
+      recordNextChunk();
 
     } catch (err) {
       console.error("[Audio] No se pudo acceder al micrófono:", err);
       setHardwareError(true);
       setRecordingState('idle');
+      setInterimTranscript(`Error mic: ${err.message}`);
     }
   }, [startVisualizer]);
 
@@ -197,15 +189,16 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false;
     setRecordingState('idle');
+    setInterimTranscript('');
     stopVisualizer();
 
-    if (intervalIdRef.current) {
-      clearInterval(intervalIdRef.current);
+    if (timeoutIdRef.current) {
+      clearTimeout(timeoutIdRef.current);
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+    if (currentRecorderRef.current && currentRecorderRef.current.state !== 'inactive') {
       try {
-        mediaRecorderRef.current.stop();
+        currentRecorderRef.current.stop();
       } catch (e) {}
     }
 
@@ -217,7 +210,7 @@ export function useAudioRecorder(canvasRef, canvasRefMobile) {
 
   useEffect(() => {
     return () => {
-      if (intervalIdRef.current) clearInterval(intervalIdRef.current);
+      if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
