@@ -18,6 +18,7 @@ export default function NodeGroup({
   onLabelChange,
   onLabelBlur,
   onLabelKeyDown,
+  onNavigateToLinkedMap,
 }) {
   const strokeColor = isActive ? '#818cf8' : '#475569';
   const strokeWidth = node.isMain ? 3 : 2;
@@ -55,6 +56,23 @@ export default function NodeGroup({
 
       {/* Punto de color jerárquico */}
       <circle r={node.isMain ? 10 : 7} fill={node.color} opacity={0.9} />
+
+      {/* Icono de Portal/Enlace si tiene linkedMapId */}
+      {node.linkedMapId && (
+        <g
+          transform={`translate(${NODE_RADIUS - 3}, ${-NODE_RADIUS + 3})`}
+          style={{ cursor: 'pointer' }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            if (onNavigateToLinkedMap) {
+              onNavigateToLinkedMap(node.linkedMapId);
+            }
+          }}
+        >
+          <circle r={8} fill="#10b981" stroke="#0f172a" strokeWidth={1.5} />
+          <path d="M-2 -2 H2 V2 M2 -2 L-2 2" stroke="white" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </g>
+      )}
 
       {/* Indicador de nodo raíz */}
       {node.isMain && (

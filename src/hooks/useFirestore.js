@@ -1,11 +1,11 @@
 // ══════════════════════════════════════════════════════════════════
 // HOOK: useFirestore — ENJAMBRE 2: Base de Datos
-// Autoguardado con debounce + carga + share link
+// Autoguardado con debounce + carga + share link + real-time sync
 // Reglas de Oro: sin queries complejos, rutas estrictas
 // ══════════════════════════════════════════════════════════════════
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  doc, setDoc, getDoc, collection, getDocs, deleteDoc
+  doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot
 } from 'firebase/firestore';
 import { db, APP_ID } from '../config/firebase';
 
@@ -31,6 +31,7 @@ export function useFirestore(userId) {
   const [saveState,   setSaveState]   = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
   const [currentMapId, setCurrentMapId] = useState(() => `map-${Date.now()}`);
   const debounceTimer = useRef(null);
+  const sessionIdRef = useRef(Math.random().toString(36).slice(2, 9));
 
   // ── Autoguardado con debounce ──────────────────────────────────
   const autoSave = useCallback((nodes) => {
@@ -42,12 +43,12 @@ export function useFirestore(userId) {
     debounceTimer.current = setTimeout(async () => {
       try {
         const docRef = mapDocRef(userId, currentMapId);
-        // Sin orderBy/limit/where — guardado simple de documento
         await setDoc(docRef, {
           nodes,
           updatedAt: new Date().toISOString(),
           mapId: currentMapId,
           userId,
+          lastSavedBy: sessionIdRef.current,
         }, { merge: true });
         setSaveState('saved');
         setTimeout(() => setSaveState('idle'), 2000);
@@ -57,6 +58,23 @@ export function useFirestore(userId) {
       }
     }, DEBOUNCE_MS);
   }, [userId, currentMapId]);
+
+  // ── Suscripción en tiempo real ─────────────────────────────────
+  const subscribeToMap = useCallback((mapId, onUpdate) => {
+    if (!userId || userId === 'guest_local') return () => {};
+    const docRef = mapDocRef(userId, mapId);
+    return onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        // Solo actualizar si el cambio no proviene de nuestra propia sesión
+        if (data.lastSavedBy !== sessionIdRef.current) {
+          onUpdate(data.nodes || []);
+        }
+      }
+    }, (err) => {
+      console.error('[Firestore] Error en onSnapshot:', err);
+    });
+  }, [userId]);
 
   // ── Carga de mapa por ID ───────────────────────────────────────
   const loadMap = useCallback(async (mapId) => {
@@ -75,17 +93,15 @@ export function useFirestore(userId) {
   }, [userId]);
 
   // ── Lista de mapas del usuario ─────────────────────────────────
-  // Descarga toda la colección y procesa en memoria JS (Regla de Oro)
   const listMaps = useCallback(async () => {
     if (!userId || userId === 'guest_local') return [];
     try {
       const colRef = collection(db, 'artifacts', APP_ID, 'users', userId, 'maps');
-      const snapshot = await getDocs(colRef); // Sin orderBy — orden en cliente
+      const snapshot = await getDocs(colRef);
       const maps = snapshot.docs.map(d => ({
         id: d.id,
         ...d.data(),
       }));
-      // Ordenar en memoria por fecha de actualización
       return maps.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
     } catch (err) {
       console.error('[Firestore] Error al listar mapas:', err);
@@ -110,7 +126,7 @@ export function useFirestore(userId) {
     }
   }, [userId]);
 
-  // ── Leer mapa compartido (sin auth requerida para lectura pública) ──
+  // ── Leer mapa compartido ───────────────────────────────────────
   const loadSharedMap = useCallback(async (shareId) => {
     try {
       const snap = await getDoc(shareDocRef(shareId));
@@ -140,6 +156,7 @@ export function useFirestore(userId) {
     currentMapId,
     setCurrentMapId,
     autoSave,
+    subscribeToMap,
     loadMap,
     listMaps,
     generateShareLink,

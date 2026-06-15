@@ -30,6 +30,7 @@ export default function CanvasPanel({
   redo,
   canUndo,
   canRedo,
+  onNavigateToLinkedMap,
 }) {
   const { t } = useI18n();
 
@@ -73,6 +74,7 @@ export default function CanvasPanel({
         handlePointerMove={handlePointerMove}
         handlePointerUp={handlePointerUp}
         updateLabel={updateLabel}
+        onNavigateToLinkedMap={onNavigateToLinkedMap}
       />
 
       {/* ── Toolbar flotante inferior ────────────────────────────── */}

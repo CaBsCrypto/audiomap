@@ -19,9 +19,16 @@ export default function LeftPanel({
   user,
   onToggleMyMaps,
   onToggleSidebar,
+  nodes = [],
+  activeNodeId = null,
+  userMaps = [],
+  currentMapId = '',
+  onLinkNodeToMap = () => {},
 }) {
   const isRecording = recordingState === 'recording';
   const textEndRef = useRef(null);
+  
+  const activeNode = nodes.find(n => n.id === activeNodeId);
 
   // Auto-scroll al final del texto cuando hay transcripción nueva
   useEffect(() => {
@@ -102,6 +109,31 @@ export default function LeftPanel({
           </div>
         )}
       </div>
+
+      {/* ── Nodo Activo & Enlace de Sesiones ─────────────────────── */}
+      {activeNode && !activeNode.isMain && (
+        <div className="p-4 border-b border-slate-800 bg-indigo-950/20 shrink-0">
+          <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Concepto Seleccionado</p>
+          <div className="flex flex-col gap-2 mt-1.5">
+            <span className="text-xs font-semibold text-indigo-300 truncate">{activeNode.label}</span>
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] text-slate-400">Enlace a sesión:</label>
+              <select
+                value={activeNode.linkedMapId || ''}
+                onChange={(e) => onLinkNodeToMap(activeNode.id, e.target.value)}
+                className="text-[11px] bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-300 focus:outline-none focus:border-indigo-500/50 max-w-[180px] truncate"
+              >
+                <option value="">(Sin enlazar)</option>
+                {userMaps.filter(m => m.id !== currentMapId).map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.nodes?.find(n => n.isMain)?.label || `Mapa: ${m.id.substring(4, 12)}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Muro de Texto (Obsidian Style) ───────────────────────── */}
       <div className="flex-1 overflow-y-auto p-5 scroll-smooth font-mono text-sm leading-relaxed">

@@ -17,6 +17,7 @@ export default function MindMapSVG({
   handlePointerMove,
   handlePointerUp,
   updateLabel,
+  onNavigateToLinkedMap,
 }) {
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [isPanning, setIsPanning] = useState(false);
@@ -158,6 +159,7 @@ export default function MindMapSVG({
             onLabelKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === 'Escape') setEditingNodeId(null);
             }}
+            onNavigateToLinkedMap={onNavigateToLinkedMap}
           />
         ))}
       </g>

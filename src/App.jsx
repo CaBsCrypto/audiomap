@@ -30,6 +30,7 @@ export default function App() {
 
   const [showMyMaps, setShowMyMaps] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [userMaps, setUserMaps] = useState([]);
 
   // ── Hooks de enjambres ────────────────────────────────────────
   const {
@@ -56,8 +57,19 @@ export default function App() {
 
   const {
     saveState, currentMapId, setCurrentMapId,
-    autoSave, loadMap, loadSharedMap, generateShareLink,
+    autoSave, subscribeToMap, loadMap, loadSharedMap, generateShareLink,
   } = useFirestore(user?.uid);
+
+  // ── Suscripción en vivo multidisciplpositivo ──────────────────
+  useEffect(() => {
+    if (!currentMapId || !user?.uid) return;
+    const unsubscribe = subscribeToMap(currentMapId, (newNodes) => {
+      if (newNodes && newNodes.length > 0) {
+        setNodes(newNodes);
+      }
+    });
+    return unsubscribe;
+  }, [currentMapId, user?.uid, subscribeToMap, setNodes]);
 
   // ── Auto-guardado en segundo plano ─────────────────────────────
   useEffect(() => {
@@ -134,7 +146,25 @@ export default function App() {
         }
       });
     }
-  }, [transcription, processChunk, t, setNodes]);
+  }, [transcription, processChunk, t, setNodesAndCommit]);
+
+  // ── Sincronizar lista de mapas para enlaces ────────────────────
+  useEffect(() => {
+    if (user?.uid && user.uid !== 'guest_local') {
+      listMaps().then(setUserMaps).catch(console.error);
+    }
+  }, [user?.uid, listMaps, currentMapId, saveState]);
+
+  const handleLinkNodeToMap = (nodeId, mapId) => {
+    setNodesAndCommit(prev => prev.map(n => n.id === nodeId ? { ...n, linkedMapId: mapId } : n));
+  };
+
+  const handleNavigateToLinkedMap = async (mapId) => {
+    const loadedNodes = await loadMap(mapId);
+    if (loadedNodes) {
+      loadFromJSON(loadedNodes);
+    }
+  };
 
   const handleStopRecording = async () => {
     await stopRecording();
@@ -180,6 +210,7 @@ export default function App() {
         setActiveNodeId={setActiveNodeId}
         setEditingNodeId={setEditingNodeId}
         updateLabel={updateLabel}
+        onNavigateToLinkedMap={handleNavigateToLinkedMap}
       />
 
       {/* ── Capa Superior: UI (Panel Obsdian y Controles) ── */}
@@ -198,6 +229,11 @@ export default function App() {
             user={user}
             onToggleMyMaps={() => setShowMyMaps(true)}
             onToggleSidebar={() => setIsSidebarOpen(false)}
+            nodes={nodes}
+            activeNodeId={activeNodeId}
+            userMaps={userMaps}
+            currentMapId={currentMapId}
+            onLinkNodeToMap={handleLinkNodeToMap}
           />
         </div>
 
