@@ -114,9 +114,9 @@ export default function App() {
     const lastLen = lastProcessedLenRef.current;
     
     // Si ha crecido al menos unos ~100 caracteres o termina en un punto
-    const newText = transcription.substring(lastLen);
+    const newText = transcription.substring(lastLen).trim();
     
-    if (newText.length > 80 || (newText.length > 20 && newText.match(/[.!?]$/))) {
+    if (newText.length > 10) {
       lastProcessedLenRef.current = currentLen;
       
       const locale = t('app.tagline').includes('AI') ? 'en' : 'es';
