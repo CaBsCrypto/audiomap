@@ -13,7 +13,8 @@ import LoginScreen          from './components/auth/LoginScreen';
 import LeftPanel            from './components/layout/LeftPanel';
 import CanvasPanel          from './components/layout/CanvasPanel';
 import MyMapsList           from './components/layout/MyMapsList';
-import { Mic, Square }      from 'lucide-react';
+import { Mic, Square, Wrench }      from 'lucide-react';
+import AudioDebugger        from './components/ui/AudioDebugger';
 
 function getShareId() {
   const params = new URLSearchParams(window.location.search);
@@ -33,6 +34,7 @@ export default function App() {
   const [showMyMaps, setShowMyMaps] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [userMaps, setUserMaps] = useState([]);
+  const [showDebugger, setShowDebugger] = useState(false);
 
   // ── Hooks de enjambres ────────────────────────────────────────
   const {
@@ -281,6 +283,16 @@ export default function App() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
             </svg>
           </button>
+
+          <div className="w-px h-8 bg-slate-700/50 mx-1" />
+
+          <button 
+            onClick={() => setShowDebugger(true)}
+            className="p-3 text-slate-400 hover:text-amber-400 hover:bg-slate-800/50 rounded-xl transition-colors"
+            title="Depurar Audio"
+          >
+            <Wrench size={18} />
+          </button>
         </div>
       </div>
 
@@ -342,6 +354,13 @@ export default function App() {
           deleteMap={deleteMap}
           currentMapId={currentMapId}
           loadFromJSON={loadFromJSON}
+        />
+      )}
+
+      {/* ── Modal: Depurador de Audio ── */}
+      {showDebugger && (
+        <AudioDebugger
+          onClose={() => setShowDebugger(false)}
         />
       )}
     </div>
